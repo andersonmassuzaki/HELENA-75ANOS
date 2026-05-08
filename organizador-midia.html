@@ -165,7 +165,16 @@
                 alert('Defina a ordem de pelo menos um item antes de enviar.');
                 return;
             }
-            if (!confirm('Enviar aprovação com as seleções atuais?')) return;
+            const semOrdem = mediaItems.filter(i => !i.order || i.order < 1);
+            if (semOrdem.length > 0) {
+                const nomes = semOrdem.map(i => i.filename).join('\n');
+                const continuar = confirm(
+                    `Atenção: ${semOrdem.length} mídia(s) ainda não têm ordem definida:\n\n${nomes}\n\nDeseja enviar mesmo assim?`
+                );
+                if (!continuar) return;
+            } else {
+                if (!confirm('Enviar aprovação com as seleções atuais?')) return;
+            }
             try {
                 this.disabled = true;
                 this.textContent = 'Enviando...';
