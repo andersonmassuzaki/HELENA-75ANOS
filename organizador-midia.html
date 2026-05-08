@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organizador de Mídia para Vídeo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; margin-bottom: 20px; }
+        h2 { color: #444; margin: 30px 0 15px; padding-top: 20px; border-top: 2px solid #ddd; }
+
+        .media-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; margin-bottom: 40px; }
+        .media-item { background: white; border: 1px solid #ddd; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+        /* Preview container */
+        .preview-wrapper { position: relative; cursor: pointer; margin-bottom: 8px; border-radius: 4px; overflow: hidden; background: #000; }
+        .preview-wrapper:hover .expand-overlay { opacity: 1; }
+        .expand-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+        .expand-overlay span { color: white; font-size: 14px; background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 4px; }
+
+        .preview-wrapper.wrapper-image { display: flex; align-items: center; justify-content: center; }
+        .preview-wrapper.wrapper-image img { max-height: 350px; object-fit: contain; width: 100%; display: block; }
+        .preview-wrapper.wrapper-video { min-height: 300px; display: flex; align-items: center; justify-content: center; }
+        .preview-wrapper.wrapper-video video { max-height: 450px; width: 100%; display: block; }
+
+        .filename { font-size: 13px; color: #666; margin-bottom: 10px; word-break: break-all; }
+        .order-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .order-input { width: 70px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        .order-label { font-weight: bold; color: #555; }
+        .error { color: #dc3545; font-size: 12px; margin-top: 5px; min-height: 18px; }
+        .notes-input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; min-height: 60px; resize: vertical; font-family: Arial, sans-serif; margin-bottom: 10px; }
+        .delete-btn { background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; }
+        .delete-btn:hover { background: #c82333; }
+
+        /* Lista ordenada */
+        .ordered-list { margin-top: 20px; }
+        .ordered-item { display: flex; gap: 20px; align-items: flex-start; margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border: 1px solid #ddd; }
+        .ordered-preview-wrapper { cursor: pointer; flex-shrink: 0; position: relative; border-radius: 4px; overflow: hidden; background: #000; }
+        .ordered-preview-wrapper:hover .expand-overlay { opacity: 1; }
+        .ordered-preview-wrapper.wrapper-image img { max-width: 180px; max-height: 180px; display: block; object-fit: contain; background: #000; }
+        .ordered-preview-wrapper.wrapper-video { max-width: 180px; }
+        .ordered-preview-wrapper.wrapper-video video { max-width: 180px; max-height: 250px; display: block; border: none; }
+        .ordered-info h3 { color: #007bff; margin-bottom: 5px; }
+        .ordered-info .filename { font-size: 13px; color: #666; margin-bottom: 5px; }
+
+        .empty-message { color: #666; font-style: italic; }
+
+        /* Loading */
+        .loading { text-align: center; padding: 40px; color: #666; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000; background: rgba(0,0,0,0.92); align-items: center; justify-content: center; padding: 30px; }
+        .modal-overlay.active { display: flex; }
+        .modal-close { position: absolute; top: 20px; right: 30px; font-size: 36px; color: white; cursor: pointer; background: none; border: none; z-index: 1001; }
+        .modal-close:hover { color: #ccc; }
+        .modal-content { display: flex; align-items: center; justify-content: center; max-width: 95vw; max-height: 90vh; }
+        .modal-content img { max-width: 95vw; max-height: 85vh; object-fit: contain; display: block; }
+        .modal-content video { max-width: 90vw; max-height: 85vh; display: block; }
+        .modal-filename { text-align: center; color: white; margin-top: 10px; font-size: 14px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { padding: 8px 16px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .tab-btn.active { background: #007bff; color: white; border-color: #007bff; }
+    </style>
+</head>
+<body>
+    <h1>Organizador de Mídia para Vídeo</h1>
+
+    <div class="tabs">
+        <button class="tab-btn active" data-filter="all">Todas</button>
+        <button class="tab-btn" data-filter="image">Fotos</button>
+        <button class="tab-btn" data-filter="video">Vídeos</button>
+    </div>
+
+    <h2>Mídias (<span id="media-count">0</span> itens)</h2>
+    <div id="media-list" class="media-list"><div class="loading">Carregando mídias...</div></div>
+
+    <div class="ordered-list">
+        <h2>Ordem Final do Vídeo</h2>
+        <div id="ordered-items"></div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modal">
+        <button class="modal-close" id="modal-close">&times;</button>
+        <div style="text-align: center;">
+            <div id="modal-content" class="modal-content"></div>
+            <div id="modal-filename" class="modal-filename"></div>
+        </div>
+    </div>
+
+    <script>
+        let mediaItems = [];
+        let savedState = {};
+        let currentFilter = 'all';
+
+        // Modal
+        function openModal(item) {
+            const content = document.getElementById('modal-content');
+            const fname = document.getElementById('modal-filename');
+            if (item.type === 'image') {
+                content.innerHTML = `<img src="${item.url}" alt="${item.filename}">`;
+            } else {
+                content.innerHTML = `<video src="${item.url}" controls autoplay></video>`;
+            }
+            fname.textContent = item.filename;
+            document.getElementById('modal').classList.add('active');
+        }
+
+        function closeModal() {
+            const content = document.getElementById('modal-content');
+            const v = content.querySelector('video');
+            if (v) v.pause();
+            document.getElementById('modal').classList.remove('active');
+            content.innerHTML = '';
+        }
+
+        document.getElementById('modal-close').addEventListener('click', closeModal);
+        document.getElementById('modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+
+        // Carregar dados do servidor
+        async function loadFromServer() {
+            try {
+                const res = await fetch('/api/media');
+                mediaItems = await res.json();
+                renderMediaList();
+                renderOrderedList();
+            } catch (e) {
+                document.getElementById('media-list').innerHTML = `<p class="empty-message">Erro ao carregar mídias: ${e.message}</p>`;
+            }
+        }
+
+        // Salvar estado de um item
+        async function saveItemState(item) {
+            try {
+                await fetch(`/api/save/${encodeURIComponent(item.filename)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ order: item.order, notes: item.notes })
+                });
+            } catch (e) { console.error('Erro ao salvar:', e); }
+        }
+
+        // Tabs
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentFilter = this.dataset.filter;
+                renderMediaList();
+            });
+        });
+
+        // Renderizar lista
+        function renderMediaList() {
+            const container = document.getElementById('media-list');
+            const countEl = document.getElementById('media-count');
+            container.innerHTML = '';
+
+            const filtered = currentFilter === 'all' ? mediaItems : mediaItems.filter(i => i.type === currentFilter);
+            countEl.textContent = filtered.length;
+
+            if (!filtered.length) {
+                container.innerHTML = '<p class="empty-message">Nenhuma mídia encontrada.</p>';
+                return;
+            }
+
+            filtered.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'media-item';
+                div.dataset.id = item.id;
+
+                const wrapperClass = item.type === 'video' ? 'wrapper-video' : 'wrapper-image';
+                const preview = item.type === 'image'
+                    ? `<img src="${item.url}" alt="${item.filename}">`
+                    : `<video src="${item.url}" controls preload="metadata"></video>`;
+
+                const orderValue = item.order !== null ? item.order : '';
+                const errorId = `error-${item.id}`;
+
+                div.innerHTML = `
+                    <div class="preview-wrapper ${wrapperClass}" data-id="${item.id}">
+                        ${preview}
+                        <div class="expand-overlay"><span>🔍 Ver maior</span></div>
+                    </div>
+                    <div class="filename">Arquivo: ${item.filename}</div>
+                    <div class="order-group">
+                        <span class="order-label">Ordem:</span>
+                        <input type="number" class="order-input" min="1" value="${orderValue}" placeholder="Nº" data-id="${item.id}">
+                    </div>
+                    <div class="error" id="${errorId}"></div>
+                    <textarea class="notes-input" placeholder="Observações..." data-id="${item.id}">${item.notes || ''}</textarea>
+                    <button class="delete-btn" data-id="${item.id}">🗑 Excluir esta mídia</button>
+                `;
+
+                container.appendChild(div);
+
+                // Clique na preview para modal
+                div.querySelector('.preview-wrapper').addEventListener('click', function(e) {
+                    if (e.target.tagName === 'VIDEO' && e.target.controls) return;
+                    openModal(item);
+                });
+
+                // Ordem
+                div.querySelector('.order-input').addEventListener('change', function() {
+                    const newOrder = parseInt(this.value);
+                    const errorEl = document.getElementById(errorId);
+                    if (this.value === '' || isNaN(newOrder) || newOrder < 1) {
+                        this.value = ''; item.order = null; errorEl.textContent = ''; saveItemState(item); renderOrderedList(); return;
+                    }
+                    if (mediaItems.find(o => o.id !== item.id && o.order === newOrder)) {
+                        errorEl.textContent = 'Ordem já utilizada!'; this.value = '';
+                    } else {
+                        errorEl.textContent = ''; item.order = newOrder; saveItemState(item); renderOrderedList();
+                    }
+                });
+
+                // Notas
+                div.querySelector('.notes-input').addEventListener('input', function() {
+                    item.notes = this.value; saveItemState(item); renderOrderedList();
+                });
+
+                // Excluir
+                div.querySelector('.delete-btn').addEventListener('click', async function() {
+                    if (!confirm(`Excluir "${item.filename}" da lista? O arquivo não será apagado do disco.`)) return;
+                    try {
+                        await fetch(`/api/delete/${encodeURIComponent(item.filename)}`, { method: 'POST' });
+                        mediaItems = mediaItems.filter(i => i.id !== item.id);
+                        renderMediaList();
+                        renderOrderedList();
+                    } catch (e) { alert('Erro ao excluir: ' + e.message); }
+                });
+            });
+        }
+
+        // Renderizar lista ordenada
+        function renderOrderedList() {
+            const container = document.getElementById('ordered-items');
+            container.innerHTML = '';
+            const ordered = mediaItems.filter(i => i.order !== null && i.order >= 1).sort((a, b) => a.order - b.order);
+
+            if (!ordered.length) {
+                container.innerHTML = '<p class="empty-message">Nenhum item com ordem definida.</p>';
+                return;
+            }
+
+            ordered.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'ordered-item';
+                const wrapperClass = item.type === 'video' ? 'wrapper-video' : 'wrapper-image';
+
+                div.innerHTML = `
+                    <div class="ordered-preview-wrapper ${wrapperClass}" data-id="${item.id}">
+                        ${item.type === 'image'
+                            ? `<img src="${item.url}" alt="${item.filename}">`
+                            : `<video src="${item.url}" controls preload="metadata"></video>`
+                        }
+                        <div class="expand-overlay"><span>🔍</span></div>
+                    </div>
+                    <div class="ordered-info">
+                        <h3>${item.order}º na ordem</h3>
+                        <div class="filename">Arquivo: ${item.filename}</div>
+                        <p>${item.notes || 'Sem observações'}</p>
+                    </div>
+                `;
+
+                container.appendChild(div);
+                div.querySelector('.ordered-preview-wrapper').addEventListener('click', function(e) {
+                    if (e.target.tagName === 'VIDEO' && e.target.controls) return;
+                    openModal(item);
+                });
+            });
+        }
+
+        // Iniciar
+        window.addEventListener('load', loadFromServer);
+    </script>
+</body>
+</html>
