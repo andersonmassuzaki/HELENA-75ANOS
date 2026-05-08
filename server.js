@@ -1,10 +1,15 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const admin = require('firebase-admin');
 
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
 const MEDIA_DIR = path.join(__dirname, 'FOTOS E VIDEOS');
-const METADATA_FILE = path.join(__dirname, '.media.metadata.json');
+
+// Inicializa Firebase
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+const db = admin.firestore();
 
 const MIME_TYPES = {
     '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -13,17 +18,19 @@ const MIME_TYPES = {
     '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript'
 };
 
-function loadMetadata() {
-    try { return JSON.parse(fs.readFileSync(METADATA_FILE, 'utf-8')); }
-    catch { return {}; }
+async function loadMetadata() {
+    const snap = await db.collection('metadata').get();
+    const meta = {};
+    snap.forEach(doc => { meta[doc.id] = doc.data(); });
+    return meta;
 }
 
-function saveMetadata(data) {
-    fs.writeFileSync(METADATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+async function saveItem(filename, data) {
+    await db.collection('metadata').doc(filename).set(data, { merge: true });
 }
 
-function getMediaList() {
-    const meta = loadMetadata();
+async function getMediaList() {
+    const meta = await loadMetadata();
     const items = [];
     const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
     const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov']);
@@ -38,11 +45,11 @@ function getMediaList() {
             if (subPath === 'image' && IMAGE_EXTS.has(ext)) {
                 const m = meta[f] || { order: null, notes: '' };
                 if (m.deleted) continue;
-                files.push({ id: `p-${f}`, filename: f, type: 'image', url: `/media/${encodeURIComponent(f)}`, order: m.order, notes: m.notes });
+                files.push({ id: `p-${f}`, filename: f, type: 'image', url: `/media/${encodeURIComponent(f)}`, order: m.order || null, notes: m.notes || '' });
             } else if (subPath === 'video' && VIDEO_EXTS.has(ext)) {
                 const m = meta[f] || { order: null, notes: '' };
                 if (m.deleted) continue;
-                files.push({ id: `v-${f}`, filename: f, type: 'video', url: `/media/${encodeURIComponent(f)}`, order: m.order, notes: m.notes });
+                files.push({ id: `v-${f}`, filename: f, type: 'video', url: `/media/${encodeURIComponent(f)}`, order: m.order || null, notes: m.notes || '' });
             }
         }
         return files;
@@ -53,81 +60,80 @@ function getMediaList() {
     return items;
 }
 
-function saveExisting(filename, data) {
-    const meta = loadMetadata();
-    meta[filename] = { order: data.order, notes: data.notes };
-    saveMetadata(meta);
-}
-
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     const p = url.pathname;
 
-    // API: lista de mídias
-    if (p === '/api/media') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(getMediaList()));
-        return;
-    }
-
-    // API: salvar metadados de um item
-    if (p.startsWith('/api/save/') && req.method === 'POST') {
-        const filename = decodeURIComponent(p.split('/api/save/')[1]);
-        let body = '';
-        req.on('data', c => body += c);
-        req.on('end', () => {
-            try {
-                saveExisting(filename, JSON.parse(body));
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ ok: true }));
-            } catch { res.writeHead(400); res.end('erro'); }
-        });
-        return;
-    }
-
-    // API: excluir item (soft delete)
-    if (p.startsWith('/api/delete/') && req.method === 'POST') {
-        const filename = decodeURIComponent(p.split('/api/delete/')[1]);
-        const meta = loadMetadata();
-        meta[filename] = { ...(meta[filename] || {}), deleted: true };
-        saveMetadata(meta);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-        return;
-    }
-
-    // Servir mídia
-    if (p.startsWith('/media/')) {
-        const filename = decodeURIComponent(p.replace('/media/', ''));
-        // Buscar em ambas pastas
-        const folders = ['FOTOS', 'VIDEOS'];
-        for (const folder of folders) {
-            const filePath = path.join(MEDIA_DIR, folder, filename);
-            if (fs.existsSync(filePath)) {
-                const ext = path.extname(filePath).toLowerCase();
-                res.writeHead(200, {
-                    'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
-                    'Content-Range': 'bytes */' + fs.statSync(filePath).size,
-                    'Access-Control-Allow-Origin': '*'
-                });
-                fs.createReadStream(filePath).pipe(res);
-                return;
-            }
+    try {
+        // API: lista de mídias
+        if (p === '/api/media') {
+            const list = await getMediaList();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(list));
+            return;
         }
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Arquivo não encontrado');
-        return;
-    }
 
-    // Index HTML
-    if (p === '/' || p === '/index.html') {
-        const htmlPath = path.join(__dirname, 'organizador-midia.html');
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        fs.createReadStream(htmlPath).pipe(res);
-        return;
-    }
+        // API: salvar metadados de um item
+        if (p.startsWith('/api/save/') && req.method === 'POST') {
+            const filename = decodeURIComponent(p.split('/api/save/')[1]);
+            let body = '';
+            req.on('data', c => body += c);
+            req.on('end', async () => {
+                try {
+                    const data = JSON.parse(body);
+                    await saveItem(filename, { order: data.order, notes: data.notes });
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: true }));
+                } catch { res.writeHead(400); res.end('erro'); }
+            });
+            return;
+        }
 
-    res.writeHead(404); res.end('Not found');
+        // API: excluir item (soft delete)
+        if (p.startsWith('/api/delete/') && req.method === 'POST') {
+            const filename = decodeURIComponent(p.split('/api/delete/')[1]);
+            await saveItem(filename, { deleted: true });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+            return;
+        }
+
+        // Servir mídia
+        if (p.startsWith('/media/')) {
+            const filename = decodeURIComponent(p.replace('/media/', ''));
+            const folders = ['FOTOS', 'VIDEOS'];
+            for (const folder of folders) {
+                const filePath = path.join(MEDIA_DIR, folder, filename);
+                if (fs.existsSync(filePath)) {
+                    const ext = path.extname(filePath).toLowerCase();
+                    res.writeHead(200, {
+                        'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+                        'Content-Range': 'bytes */' + fs.statSync(filePath).size,
+                        'Access-Control-Allow-Origin': '*'
+                    });
+                    fs.createReadStream(filePath).pipe(res);
+                    return;
+                }
+            }
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Arquivo não encontrado');
+            return;
+        }
+
+        // Index HTML
+        if (p === '/' || p === '/index.html') {
+            const htmlPath = path.join(__dirname, 'organizador-midia.html');
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            fs.createReadStream(htmlPath).pipe(res);
+            return;
+        }
+
+        res.writeHead(404); res.end('Not found');
+
+    } catch (err) {
+        console.error(err);
+        res.writeHead(500); res.end('Erro interno');
+    }
 });
 
 server.listen(PORT, () => {
