@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 8080;
 const MEDIA_DIR = path.join(__dirname, 'FOTOS E VIDEOS');
 
 // Inicializa Firebase
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY.replace(/\n/g, '\\n'));
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
