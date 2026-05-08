@@ -1,3 +1,4 @@
 .DS_Store
 .media.metadata.json
 node_modules/
+Firebase/
