@@ -89,10 +89,39 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        // API: excluir item (soft delete)
-        if (p.startsWith('/api/delete/') && req.method === 'POST') {
-            const filename = decodeURIComponent(p.split('/api/delete/')[1]);
-            await saveItem(filename, { deleted: true });
+        // API: enviar aprovação — salva todos os itens de uma vez
+        if (p === '/api/submit' && req.method === 'POST') {
+            let body = '';
+            req.on('data', c => body += c);
+            req.on('end', async () => {
+                try {
+                    const items = JSON.parse(body);
+                    // Apaga tudo antes de salvar o novo estado
+                    const snap = await db.collection('metadata').get();
+                    const batch = db.batch();
+                    snap.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+                    // Salva cada item
+                    for (const item of items) {
+                        await saveItem(item.filename, {
+                            order: item.order || null,
+                            notes: item.notes || '',
+                            deleted: item.deleted || false
+                        });
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: true }));
+                } catch (err) { res.writeHead(400); res.end('erro'); }
+            });
+            return;
+        }
+
+        // API: recomeçar — apaga todos os metadados do Firestore
+        if (p === '/api/reset' && req.method === 'POST') {
+            const snap = await db.collection('metadata').get();
+            const batch = db.batch();
+            snap.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true }));
             return;
